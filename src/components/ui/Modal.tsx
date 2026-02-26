@@ -26,7 +26,7 @@ export function Modal({ open, onClose, title, children, size = "md" }: ModalProp
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center pt-20">
       <div className="fixed inset-0 bg-black/40" onClick={onClose} />
-      <div className={`relative bg-white rounded-lg shadow-xl w-full ${widths[size]} mx-4 max-h-[80vh] flex flex-col`}>
+      <div className={`relative z-10 bg-white rounded-lg shadow-xl w-full ${widths[size]} mx-4 max-h-[80vh] flex flex-col`}>
         <div className="flex items-center justify-between px-4 py-3 border-b border-sf-border">
           <h2 className="text-lg font-semibold text-sf-text">{title}</h2>
           <button
