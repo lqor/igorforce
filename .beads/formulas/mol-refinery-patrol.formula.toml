@@ -1,0 +1,183 @@
+# Formula: mol-refinery-patrol
+# Type: patrol
+# Created by: gt formula create
+#
+# Refinery patrol cycle. Runs as wisps (ephemeral, not synced to git).
+# Each cycle: check inbox, scan merge queue, process branches, merge to main.
+
+description = """Refinery patrol cycle.
+
+Processes the merge queue for igorforce rig. Checks inbox for MERGE_READY
+signals, scans for polecat branches, rebases, runs tests, and merges to main."""
+formula = "mol-refinery-patrol"
+version = 1
+
+[[steps]]
+id = "inbox-check"
+title = "Check inbox for messages and escalations"
+description = """
+Check the refinery inbox for messages requiring action.
+
+**Handle in priority order:**
+1. MERGE_READY signals from witness (proceed to queue-scan)
+2. Escalations from witness or deacon
+3. Handoff messages (read for context)
+
+**Commands:**
+- `gt mail inbox`
+- `gt mail read <id>`
+- `gt mail delete <id>` (delete after handling)
+"""
+
+[[steps]]
+id = "queue-scan"
+title = "Scan merge queue for branches"
+needs = ["inbox-check"]
+description = """
+Check the beads merge queue (ONLY source of truth).
+
+**Commands:**
+- `git fetch --prune origin`
+- `gt mq list igorforce`
+
+CRITICAL: `gt mq list` is the ONLY source of truth.
+NEVER use `git branch -r | grep polecat`.
+If queue empty, skip to context-check.
+"""
+
+[[steps]]
+id = "process-branch"
+title = "Rebase next branch on main"
+needs = ["queue-scan"]
+description = """
+Pick next branch from queue, rebase on current main.
+
+**Commands:**
+- `git checkout main && git pull --ff-only origin main`
+- `git checkout -b temp origin/polecat/<worker>`
+- `git rebase origin/main`
+
+If conflicts are unresolvable: notify polecat, skip to loop-check.
+"""
+
+[[steps]]
+id = "run-tests"
+title = "Run quality checks and test suite"
+needs = ["process-branch"]
+description = """
+Run configured test commands (skip empty ones):
+setup -> typecheck -> lint -> build -> test.
+
+Read `bd show <step-id>` for exact commands if configured.
+"""
+
+[[steps]]
+id = "handle-failures"
+title = "Verification gate"
+needs = ["run-tests"]
+description = """
+VERIFICATION GATE - cannot proceed without resolution.
+
+Tests PASSED -> proceed to merge-push.
+
+Tests FAILED:
+- Branch caused it? -> Abort, reopen source issue, notify witness
+  (MERGE_FAILED), close MR, delete branch.
+- Pre-existing? -> File bead (`bd create --type=bug --priority=1
+  --title="..."`), then proceed.
+
+GATE: Cannot proceed to merge without fix OR bead filed.
+FORBIDDEN: Note failure and merge without tracking.
+"""
+
+[[steps]]
+id = "merge-push"
+title = "Merge to main and push"
+needs = ["handle-failures"]
+description = """
+Fast-forward merge to main and push.
+
+**Commands:**
+- `git checkout main`
+- `git merge --ff-only temp`
+- `git push origin main`
+- `git branch -d temp`
+- `git push origin --delete polecat/<worker>`
+
+After push, notify witness: MERGED.
+"""
+
+[[steps]]
+id = "loop-check"
+title = "Check for more branches"
+needs = ["merge-push"]
+description = """
+More branches in queue? Return to process-branch.
+
+If more branches remain, loop back to process-branch
+(re-fetch, re-scan, sequential rebase on updated main).
+If no more branches, proceed to generate-summary.
+"""
+
+[[steps]]
+id = "generate-summary"
+title = "Summarize patrol cycle"
+needs = ["loop-check"]
+description = """
+Summarize this patrol cycle:
+- Branches merged (count)
+- Tests run and results
+- Conflicts encountered
+- Issues filed
+"""
+
+[[steps]]
+id = "check-integration-branches"
+title = "Check integration branch readiness"
+needs = ["generate-summary"]
+description = """
+Check if any integration branches are ready to land.
+
+If auto_land is false, say "Auto-land disabled" and move on.
+FORBIDDEN: Landing integration branches via raw git.
+Only use `gt mq integration land <epic-id>`.
+"""
+
+[[steps]]
+id = "context-check"
+title = "Check context and session health"
+needs = ["check-integration-branches"]
+description = """
+Assess session health:
+- RSS: `ps -o rss= -p $$`
+- Session age
+- Context usage
+
+If unhealthy, prepare for handoff.
+"""
+
+[[steps]]
+id = "patrol-cleanup"
+title = "End-of-cycle inbox hygiene"
+needs = ["context-check"]
+description = """
+Archive stale messages, check for orphaned MR beads.
+
+- `gt mail inbox` — check for unhandled messages
+- Clean up any temp branches left behind
+"""
+
+[[steps]]
+id = "burn-or-loop"
+title = "Burn wisp and loop or exit"
+needs = ["patrol-cleanup"]
+description = """
+Decision point: continue patrolling or hand off.
+
+**Loop:** `gt mol squash --jitter 10s --summary="..."` then `gt patrol new`
+**Exit:** `gt handoff -s "Patrol complete" -m "RSS: ${RSS_MB}MB"`
+
+Criteria:
+- If session is healthy and queue had work -> loop
+- If session is heavy or no work found -> hand off
+"""
